@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data:; connect-src 'self'; img-src 'self' data:">
+<title>Flow Manual Search</title>
+<style>
+  :root {
+    --bg: #EDF0F3;
+    --surface: #FFFFFF;
+    --ink: #18212B;
+    --muted: #5A6672;
+    --rule: #CBD3DC;
+    --signal: #1E5BD8;
+    --signal-ink: #FFFFFF;
+    --mark: #DCE6FB;
+    --curve: #9DB4E6;
+    --display: "Bahnschrift", "DIN Alternate", "DIN 2014", "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+    --text: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12171D; --surface: #1A2129; --ink: #E4E9EE; --muted: #93A0AD;
+      --rule: #2C3640; --signal: #79A2FF; --signal-ink: #0E1520; --mark: #23345A; --curve: #3E5C99;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.55 var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+  /* ---------- layout ---------- */
+  .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+  .top {
+    display: grid; grid-template-columns: 1fr; justify-items: center;
+    padding: 0 24px;
+    transition: padding .35s ease;
+  }
+  .home .top { padding-top: max(12vh, 48px); }
+  .searching .top {
+    justify-items: start; grid-template-columns: auto 1fr; align-items: center; gap: 28px;
+    padding: 14px 24px; background: var(--surface); border-bottom: 1px solid var(--rule);
+  }
+
+  .brand { text-align: center; }
+  .searching .brand { text-align: left; cursor: pointer; }
+  .brand h1 {
+    margin: 0; font: 600 44px/1 var(--display); letter-spacing: -0.01em;
+    font-stretch: semi-condensed;
+  }
+  .searching .brand h1 { font-size: 22px; }
+  .brand p { margin: 0 0 22px; color: var(--muted); font-size: 14px; }
+  .searching .brand p, .searching .curve { display: none; }
+
+  .curve { display: block; width: min(560px, 90vw); height: 54px; margin: 18px auto 22px; }
+  .curve path { fill: none; stroke: var(--curve); stroke-width: 1.5; }
+  .curve .axis { stroke: var(--rule); stroke-width: 1; }
+  .curve .live { stroke-dasharray: 900; stroke-dashoffset: 900; animation: draw 1.4s .2s ease-out forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .curve .live { animation: none; stroke-dashoffset: 0; }
+    .top { transition: none; }
+  }
+
+  form.box {
+    display: flex; width: min(680px, 100%);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 28px;
+    padding: 5px 5px 5px 22px; box-shadow: 0 1px 2px rgba(20,30,45,.06);
+  }
+  form.box:focus-within { border-color: var(--signal); }
+  form.box input { appearance: none; -webkit-appearance: none; }
+  .searching form.box { width: min(640px, 100%); }
+  form.box input {
+    flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+    font-size: 17px; padding: 9px 0;
+  }
+  form.box input:focus-visible { outline: none; }
+  form.box input::placeholder { color: var(--muted); opacity: .85; }
+  form.box button {
+    border: 0; border-radius: 22px; padding: 0 22px;
+    background: var(--signal); color: var(--signal-ink);
+    font: 600 15px var(--display); cursor: pointer;
+  }
+
+  /* ---------- home: contents ---------- */
+  .contents { width: min(680px, 100%); margin: 40px auto 48px; padding: 0 24px; }
+  .contents h2 { font: 600 15px var(--display); color: var(--muted); margin: 0 0 10px; }
+  .contents ol {
+    list-style: none; margin: 0; padding: 0;
+    columns: 2 260px; column-gap: 36px;
+  }
+  .contents li { break-inside: avoid; }
+  .contents button {
+    display: grid; grid-template-columns: 2.2em 1fr auto; gap: 6px; width: 100%;
+    background: none; border: 0; border-bottom: 1px solid var(--rule);
+    padding: 7px 2px; text-align: left; cursor: pointer;
+  }
+  .contents button:hover .t { color: var(--signal); }
+  .contents .n, .contents .p { font-family: var(--display); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .searching .contents { display: none; }
+
+  /* ---------- results ---------- */
+  .body { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .body.with-preview { grid-template-columns: minmax(0, 1fr) minmax(360px, 44%); }
+  .results { overflow-y: auto; padding: 8px 24px 40px; }
+  .home .body { display: none; }
+  .results-inner { max-width: 700px; margin-left: clamp(0px, 7vw, 150px); }
+  .with-preview .results-inner { margin-left: 0; }
+  .status { color: var(--muted); font-size: 13px; margin: 14px 0 6px; }
+
+  .hit { padding: 16px 0 18px; border-bottom: 1px solid var(--rule); display: grid; grid-template-columns: 4.2em 1fr; }
+  .hit .num {
+    font: 600 18px/1.35 var(--display); color: var(--signal);
+    font-variant-numeric: tabular-nums;
+  }
+  .hit h3 { margin: 0; font: 600 19px/1.3 var(--display); }
+  .hit h3 button { all: unset; cursor: pointer; }
+  .hit h3 button:hover { color: var(--signal); text-decoration: underline; text-underline-offset: 3px; }
+  .hit h3 button:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+  .hit .where { color: var(--muted); font-size: 13px; margin: 2px 0 6px; }
+  .hit .where b { font-weight: 600; color: var(--ink); }
+  .hit .snip { margin: 0; max-width: 68ch; }
+  .hit mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2px; }
+  .hit .actions { display: flex; gap: 16px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .link { border: 0; background: none; padding: 0; color: var(--signal); cursor: pointer; font-size: 13px; }
+  .link:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .hit.active .num { text-decoration: underline; text-underline-offset: 4px; }
+
+  .btn {
+    border: 1px solid var(--rule); background: var(--surface); border-radius: 16px;
+    padding: 4px 14px; font-size: 13px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--signal); color: var(--signal); }
+
+  .empty { margin-top: 28px; max-width: 56ch; }
+  .empty h3 { font: 600 19px var(--display); margin: 0 0 6px; }
+  .empty p { margin: 0; color: var(--muted); }
+
+  /* ---------- page preview ---------- */
+  .preview {
+    display: none; min-height: 0; border-left: 1px solid var(--rule); background: var(--surface);
+    grid-template-rows: auto 1fr;
+  }
+  .with-preview .preview { display: grid; }
+  .preview header {
+    display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--rule);
+  }
+  .preview .label { font: 600 15px var(--display); margin-right: auto; font-variant-numeric: tabular-nums; }
+  .preview .label span { color: var(--muted); font-weight: 400; }
+  .iconbtn {
+    width: 32px; height: 32px; border-radius: 16px; border: 1px solid var(--rule);
+    background: var(--surface); cursor: pointer; display: grid; place-items: center;
+  }
+  .iconbtn:hover { border-color: var(--signal); color: var(--signal); }
+  .iconbtn svg { width: 16px; height: 16px; }
+  .page-wrap { overflow: auto; padding: 16px; background: var(--bg); }
+  .sheet { position: relative; width: 100%; max-width: 760px; margin: 0 auto; }
+  .sheet img { display: block; width: 100%; background: #fff; box-shadow: 0 0 0 1px var(--rule); }
+  .marker {
+    position: absolute; display: none; pointer-events: none;
+    background: rgba(30, 91, 216, .12); border-left: 4px solid #1E5BD8; border-radius: 2px;
+  }
+  .marker.on { display: block; animation: pulse 1.6s ease-out 1; }
+  @keyframes pulse { 0% { background: rgba(30, 91, 216, .38); } 100% { background: rgba(30, 91, 216, .12); } }
+  @media (prefers-reduced-motion: reduce) { .marker.on { animation: none; } }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 18px; font-size: 13px;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .toast.show { opacity: 1; }
+
+  @media (max-width: 900px) {
+    .body.with-preview { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .preview { border-left: 0; border-top: 1px solid var(--rule); }
+    .searching .top { grid-template-columns: 1fr; gap: 10px; }
+    .results-inner { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="app home" id="app">
+  <div class="top">
+    <div class="brand" id="brand" title="Back to start">
+      <h1>Flow manual search</h1>
+      <svg class="curve" viewBox="0 0 560 54" aria-hidden="true">
+        <path class="axis" d="M0 34 H560"/>
+        <path class="live" d="M0 34 C60 34 90 33 120 31 C150 29 160 12 190 12 C220 12 232 30 262 33 C300 37 330 44 362 44 C394 44 410 36 440 32 C480 27 520 22 560 20"/>
+      </svg>
+      <p id="sub">Ask a question in your own words. Answers point to the section and page.</p>
+    </div>
+    <form class="box" id="form" role="search" autocomplete="off">
+      <input id="q" type="search" aria-label="Question about Dirac Flow"
+             placeholder="How do I connect Flow to the device?" autofocus>
+      <button type="submit">Search</button>
+    </form>
+  </div>
+
+  <div class="body" id="body">
+    <main class="results" id="results" aria-live="polite">
+      <div class="results-inner" id="list"></div>
+    </main>
+    <aside class="preview" id="preview" aria-label="Manual page">
+      <header>
+        <div class="label" id="pgLabel">Page</div>
+        <button class="iconbtn" id="prev" title="Previous page" aria-label="Previous page">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 3 5 8l5 5"/></svg></button>
+        <button class="iconbtn" id="next" title="Next page" aria-label="Next page">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 3 5 5-5 5"/></svg></button>
+        <button class="btn" id="openHere">Open PDF at this page</button>
+        <button class="iconbtn" id="close" title="Close page (Esc)" aria-label="Close page">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+      </header>
+      <div class="page-wrap" id="pageWrap"><div class="sheet"><img id="pageImg" alt=""><div class="marker" id="marker"></div></div></div>
+    </aside>
+  </div>
+
+  <section class="contents" id="contents" aria-label="Chapters">
+    <h2>Chapters</h2>
+    <ol id="chapters"></ol>
+  </section>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  const serverMode = new URLSearchParams(location.search).get("mode") === "server";
+  const $ = id => document.getElementById(id);
+  const app = $("app"), body = $("body"), list = $("list");
+  let totalPages = 32, currentPage = null, activeHit = null, lastResults = [], markTarget = null;
+
+  // ---- bridge to Python (native window or local fallback server) ----
+  const routes = { search: ["search", "q"], info: ["info"], page_image: ["page", "n"], open_pdf: ["open", "page"] };
+  function call(name, arg) {
+    if (serverMode) {
+      const [path, key] = routes[name];
+      const qs = key ? `?${key}=${encodeURIComponent(arg)}` : "";
+      return fetch(`/api/${path}${qs}`).then(r => r.json());
+    }
+    return window.pywebview.api[name](arg);
+  }
+  function whenReady(fn) {
+    if (serverMode || (window.pywebview && window.pywebview.api)) return fn();
+    window.addEventListener("pywebviewready", fn, { once: true });
+  }
+  if (serverMode) setInterval(() => fetch("/api/ping").catch(() => {}), 5000);
+
+  // ---- helpers ----
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  function highlight(text, words) {
+    let html = esc(text);
+    if (!words || !words.length) return html;
+    const stems = words.map(w => w.toLowerCase().replace(/(ies|ing|ed|es|s)$/, "")).filter(w => w.length > 2);
+    if (!stems.length) return html;
+    const re = new RegExp(`\\b(${stems.map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})[a-z]*`, "gi");
+    return html.replace(re, m => `<mark>${m}</mark>`);
+  }
+  const pageText = pages => pages.length > 1 ? `Pages ${pages[0]}–${pages[pages.length - 1]}` : `Page ${pages[0]}`;
+  function toast(msg) {
+    const t = $("toast"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), 2600);
+  }
+
+  // ---- start screen ----
+  whenReady(async () => {
+    const info = await call("info");
+    totalPages = info.pages || totalPages;
+    const title = (info.cover || "").replace(/\s*User manual\s*$/i, "").trim();
+    if (title) $("sub").textContent = `Dirac ${title} user manual. Ask in your own words; answers point to the section and page.`;
+    $("chapters").innerHTML = info.chapters.map(c =>
+      `<li><button data-q="${esc(c.title)}" data-page="${c.page}">
+         <span class="n">${esc(c.num)}</span><span class="t">${esc(c.title)}</span><span class="p">${c.page}</span>
+       </button></li>`).join("");
+  });
+  $("chapters").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    $("q").value = b.dataset.q; runSearch().then(() => showPage(+b.dataset.page, null));
+  });
+
+  // ---- search ----
+  async function runSearch() {
+    const q = $("q").value.trim();
+    if (!q) { $("q").focus(); return; }
+    app.classList.replace("home", "searching");
+    closePage();
+    const res = await call("search", q);
+    render(res);
+  }
+  function render(res) {
+    activeHit = null;
+    if (!res.results.length) {
+      list.innerHTML = `<div class="empty"><h3>Nothing in the manual matches that</h3>
+        <p>Try other words, or the name of a feature such as Power EQ, Matrix mixer or Device connection.</p></div>`;
+      return;
+    }
+    const status = res.strong
+      ? `Best matches in the manual for “${esc(res.query)}”`
+      : `No close match for “${esc(res.query)}”. These sections are the nearest.`;
+    list.innerHTML = `<p class="status">${status}</p>` + res.results.map((r, i) => `
+      <article class="hit" data-i="${i}">
+        <div class="num">${esc(r.section)}</div>
+        <div>
+          <h3><button data-act="show">${esc(r.title)}</button></h3>
+          <div class="where">${esc(r.chapter)}, <b>${pageText(r.pages)}</b></div>
+          <p class="snip">${highlight(r.snippet, res.highlight)}</p>
+          <div class="actions">
+            <button class="btn" data-act="show">Show on page ${r.section_page}</button>
+            <button class="link" data-act="open">Open PDF at page ${r.section_page}</button>
+          </div>
+        </div>
+      </article>`).join("");
+    lastResults = res.results;
+    $("results").scrollTop = 0;
+  }
+  list.addEventListener("click", e => {
+    const b = e.target.closest("button[data-act]"); if (!b) return;
+    const hit = b.closest(".hit"), r = lastResults[+hit.dataset.i];
+    if (b.dataset.act === "show") { setActive(hit); showPage(r.section_page, r); }
+    else openPdf(r.section_page);
+  });
+  function setActive(hit) {
+    if (activeHit) activeHit.classList.remove("active");
+    activeHit = hit; hit.classList.add("active");
+  }
+
+  // ---- page preview ----
+  async function showPage(n, target) {
+    n = Math.min(Math.max(1, n), totalPages);
+    if (target !== undefined) markTarget = target;
+    const src = await call("page_image", n);
+    if (!src) return;
+    currentPage = n;
+    const img = $("pageImg");
+    img.src = src;
+    await (img.decode ? img.decode().catch(() => {}) : Promise.resolve());
+    placeMarker(n);
+    $("pageImg").alt = `Manual page ${n}`;
+    $("pgLabel").innerHTML = `Page ${n} <span>of ${totalPages}</span>`;
+    $("prev").disabled = n <= 1; $("next").disabled = n >= totalPages;
+    body.classList.add("with-preview");
+  }
+  function placeMarker(n) {
+    const m = $("marker");
+    m.classList.remove("on");
+    const a = markTarget && markTarget.section_page === n ? markTarget.anchor : null;
+    if (!a) { $("pageWrap").scrollTop = 0; return; }
+    const padX = 0.012, padY = 0.006;
+    m.style.left = `${(a[0] - padX) * 100}%`;
+    m.style.top = `${(a[1] - padY) * 100}%`;
+    m.style.width = `${(Math.max(a[2], a[0] + 0.3) - a[0] + 2 * padX) * 100}%`;
+    m.style.height = `${(a[3] - a[1] + 2 * padY) * 100}%`;
+    void m.offsetWidth;  // restart the pulse
+    m.classList.add("on");
+    const wrap = $("pageWrap"), img = $("pageImg");
+    const y = img.offsetTop + a[1] * img.clientHeight - wrap.clientHeight * 0.3;
+    wrap.scrollTo({ top: Math.max(0, y), behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
+  function closePage() { body.classList.remove("with-preview"); currentPage = null; markTarget = null; }
+  async function openPdf(page) {
+    const r = await call("open_pdf", page);
+    toast(r && r.message ? r.message : "Opening the manual");
+  }
+  $("prev").onclick = () => showPage(currentPage - 1);
+  $("next").onclick = () => showPage(currentPage + 1);
+  $("close").onclick = closePage;
+  $("openHere").onclick = () => openPdf(currentPage || 1);
+
+  // ---- form, navigation, keys ----
+  $("form").addEventListener("submit", e => { e.preventDefault(); runSearch(); });
+  $("brand").addEventListener("click", () => {
+    if (!app.classList.contains("searching")) return;
+    app.classList.replace("searching", "home"); closePage(); list.innerHTML = "";
+    $("q").value = ""; $("q").focus();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "/" && document.activeElement !== $("q")) { e.preventDefault(); $("q").focus(); $("q").select(); }
+    else if (e.key === "Escape" && currentPage) closePage();
+    else if (currentPage && document.activeElement !== $("q") && (e.key === "ArrowLeft" || e.key === "ArrowRight"))
+      showPage(currentPage + (e.key === "ArrowRight" ? 1 : -1));
+  });
+})();
+</script>
+</body>
+</html>
